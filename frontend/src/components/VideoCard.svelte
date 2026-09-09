@@ -22,6 +22,8 @@
     navigate = () => {},
     onDownload = () => {},
     downloadDisabled = () => true,
+    onDelete = () => {},
+    deleteDisabled = () => true,
   } = $props();
 
   let catalogOnly = $derived(isCatalogOnly(item));
@@ -39,6 +41,18 @@
   let videoURL = $derived(videoHref(item?.id || ''));
   let itemChannelHref = $derived(channelHref(item?.channel));
   let duration = $derived(formatDuration(item?.duration_seconds));
+  // List endpoints never sign media URLs, so downloaded media is signalled by
+  // the archive state: anything that is not catalog-only has a local file.
+  let showDeleteAction = $derived(!catalogOnly && !!item?.id);
+  let deleteBusy = $derived(showDeleteAction && deleteDisabled(item));
+  let deleteLabel = $derived(`Delete the local video file for ${item?.title || 'this video'}`);
+
+  function handleDeleteClick(event) {
+    // The thumbnail is a navigation link; the delete overlay must never act as one.
+    event.preventDefault();
+    event.stopPropagation();
+    onDelete(item);
+  }
 
   function progressPercent(job) {
     const value = Number(job?.progress) || 0;
@@ -68,15 +82,22 @@
 {/snippet}
 
 <article class:flat class="video-tile" data-testid={testId} data-video-id={item?.id}>
-  {#if showDownloadAction}
-    <button class="thumbnail-link catalog-download-thumb" type="button" disabled={disabled} onclick={() => onDownload(item)} aria-label={`${downloadButtonLabel} ${item?.title || 'video'}`}>
-      {@render thumbnail()}
-    </button>
-  {:else}
-    <a class="thumbnail-link" href={videoURL} onclick={event => navigate(event, videoURL)} aria-label={videoTileLabel(item)}>
-      {@render thumbnail()}
-    </a>
-  {/if}
+  <div class="thumb-wrap">
+    {#if showDownloadAction}
+      <button class="thumbnail-link catalog-download-thumb" type="button" disabled={disabled} onclick={() => onDownload(item)} aria-label={`${downloadButtonLabel} ${item?.title || 'video'}`}>
+        {@render thumbnail()}
+      </button>
+    {:else}
+      <a class="thumbnail-link" href={videoURL} onclick={event => navigate(event, videoURL)} aria-label={videoTileLabel(item)}>
+        {@render thumbnail()}
+      </a>
+    {/if}
+    {#if showDeleteAction}
+      <button class="thumb-delete" type="button" data-testid="video-card-delete" disabled={deleteBusy} aria-label={deleteLabel} title="Delete local video file" onclick={handleDeleteClick}>
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" /></svg>
+      </button>
+    {/if}
+  </div>
   {#if showPlaybackProgress}<div class="visually-hidden" data-testid="playback-progress" role="progressbar" aria-label={`Playback progress for ${item?.title || 'video'}`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={playbackProgress}>{playbackProgress}% watched</div>{/if}
   {#if showDownloadAction && downloadActive}<div class="visually-hidden" role="progressbar" aria-label={`Download progress for ${item?.title || 'video'}`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={downloadProgress}>{downloadProgress}%</div>{/if}
 

@@ -1681,6 +1681,58 @@ button.thumbnail-link:disabled {
   right: 0.45rem;
 }
 
+.thumb-wrap {
+  position: relative;
+}
+
+/* Thumbnail delete overlay: mirrors the duration badge corner-wise (top
+   right) and reveals on hover. Touch devices have no hover, so the overlay
+   stays visible there. */
+.thumb-delete {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.78);
+  border: 1px solid rgba(247, 239, 226, 0.18);
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  height: 1.9rem;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  right: 0.45rem;
+  top: 0.45rem;
+  transition: opacity 140ms ease;
+  width: 1.9rem;
+  z-index: 3;
+}
+
+.thumb-wrap:hover .thumb-delete,
+.thumb-wrap:focus-within .thumb-delete {
+  opacity: 1;
+}
+
+.thumb-delete:hover {
+  background: rgba(164, 42, 42, 0.92);
+}
+
+.thumb-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.thumb-delete svg {
+  height: 1rem;
+  width: 1rem;
+}
+
+@media (hover: none) {
+  .thumb-delete {
+    opacity: 1;
+  }
+}
+
 .tile-meta {
   display: grid;
   gap: 0.75rem;

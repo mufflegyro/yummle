@@ -36,5 +36,5 @@
 - [ ] [Investigate the mark-as-played button's desktop vs mobile behavior difference](issues/investigate-mark-played-desktop-vs-mobile.md)
 - [x] [Handle scheduled premiere videos with smart retry scheduling](issues/handle-premiere-video-download-retry.md)
 - [ ] [Add episodes to a new playlist from the UI](issues/add-episodes-to-playlist.md)
-- [ ] [Add video delete button to thumbnails in sort views](issues/add-video-delete-button-on-thumbnails.md)
+- [x] [Add video delete button to thumbnails in sort views](issues/add-video-delete-button-on-thumbnails.md)
 - [ ] [Delete a channel subscription and its archived content](issues/cascade-delete-channel-archive.md)

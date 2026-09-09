@@ -94,6 +94,7 @@
   let keepForeverRequestToken = 0;
   let markPlayedRequestToken = 0;
   let deleteVideoMediaRequestToken = 0;
+  let deleteVideoMediaCardRequestToken = 0;
   let playlistListRequestToken = 0;
   let playlistRequestToken = 0;
   let searchRequestToken = 0;
@@ -167,6 +168,8 @@
   let keepForeverAction = { status: 'idle', error: '' };
   let markPlayedAction = { status: 'idle', error: '' };
   let deleteVideoMediaAction = { status: 'idle', error: '' };
+  let deleteVideoMediaCardAction = { status: 'idle', error: '', videoID: '' };
+  let deleteVideoMediaCardResetTimer = null;
   let channelSubscriptionOverride = { id: '', subscribed: null };
   let library = { status: 'idle', videos: [], pagination: { page: 1, page_size: libraryPageSize, total: 0 }, refreshing: false, loadingMore: false, loadMoreError: '', error: '' };
   let upNextCandidates = { videoID: '', videos: [] };
@@ -1591,6 +1594,44 @@
       if (requestToken !== deleteVideoMediaRequestToken || video.item?.id !== item.id) return;
       deleteVideoMediaAction = { status: 'error', error: error.message };
     }
+  }
+
+  async function deleteVideoMediaFromCard(item) {
+    // Grid items never carry a signed media_url (list endpoints omit it), so
+    // downloaded media is signalled by the archive state instead.
+    if (!item?.id || isCatalogOnly(item) || deleteVideoMediaCardAction.status === 'loading') return;
+    const confirmed = window.confirm(`Delete the local video file for "${item.title || 'this video'}"?
+
+Metadata, comments, thumbnails, and catalog information will stay.`);
+    if (!confirmed) return;
+
+    const requestToken = ++deleteVideoMediaCardRequestToken;
+    deleteVideoMediaCardAction = { status: 'loading', error: '', videoID: item.id };
+    try {
+      await requestNoContent(`/api/videos/${encodeURIComponent(item.id)}/media`, 'DELETE');
+      if (requestToken !== deleteVideoMediaCardRequestToken) return;
+      deleteVideoMediaCardAction = { status: 'succeeded', error: '', videoID: item.id };
+      if (deleteVideoMediaCardResetTimer) clearTimeout(deleteVideoMediaCardResetTimer);
+      deleteVideoMediaCardResetTimer = setTimeout(() => {
+        if (deleteVideoMediaCardAction.status === 'succeeded') deleteVideoMediaCardAction = { status: 'idle', error: '', videoID: '' };
+      }, 4000);
+      // Reflect the catalog-only state immediately so the overlay disappears
+      // without waiting for the grid refreshes below.
+      const markCatalogOnly = entry => (entry.id === item.id ? { ...entry, media_url: '', archive_state: 'catalog-only' } : entry);
+      library = { ...library, videos: library.videos.map(markCatalogOnly) };
+      channelPage = { ...channelPage, videos: channelPage.videos.map(markCatalogOnly) };
+      playlistPage = { ...playlistPage, videos: playlistPage.videos.map(markCatalogOnly) };
+      loadLibrary({ showLoading: false });
+      if (channelID) loadChannel(channelID);
+      if (playlistID) loadPlaylist(playlistID, { showLoading: false });
+    } catch (error) {
+      if (requestToken !== deleteVideoMediaCardRequestToken) return;
+      deleteVideoMediaCardAction = { status: 'error', error: error.message, videoID: item.id };
+    }
+  }
+
+  function cardDeleteDisabled() {
+    return deleteVideoMediaCardAction.status === 'loading';
   }
 
   function playedProgressPayload(item) {
@@ -3608,9 +3649,10 @@
         {:else if library.videos.length === 0}
           <div class="state" data-testid="library-empty"><strong>{libraryEmptyState.title}</strong><span>{libraryEmptyState.body}</span></div>
         {:else}
+          {#if deleteVideoMediaCardAction.status === 'error'}<div role="alert" class="job-state compact state-error" data-testid="video-card-delete-status">Could not delete video media: {deleteVideoMediaCardAction.error}</div>{:else if deleteVideoMediaCardAction.status === 'succeeded'}<div role="status" aria-live="polite" class="job-state compact" data-testid="video-card-delete-status">Local video file deleted.</div>{/if}
           <div class="video-grid" data-testid="library-videos">
             {#each library.videos as item (item.id)}
-              <VideoCard {item} {navigate} />
+              <VideoCard {item} {navigate} onDelete={deleteVideoMediaFromCard} deleteDisabled={cardDeleteDisabled} />
             {/each}
           </div>
           {#if libraryHasMore || library.refreshing || library.loadingMore || library.loadMoreError}
@@ -3693,9 +3735,10 @@
           {#if channelPage.videos.length === 0}
             <div class="state">No videos are archived for this channel yet.</div>
           {:else}
+            {#if deleteVideoMediaCardAction.status === 'error'}<div role="alert" class="job-state compact state-error" data-testid="video-card-delete-status">Could not delete video media: {deleteVideoMediaCardAction.error}</div>{:else if deleteVideoMediaCardAction.status === 'succeeded'}<div role="status" aria-live="polite" class="job-state compact" data-testid="video-card-delete-status">Local video file deleted.</div>{/if}
             <div class="video-grid channel-grid">
               {#each channelPage.videos as item (item.id)}
-                <VideoCard {item} showChannel={false} flat={true} enableCatalogDownload={true} downloadJob={catalogVideoJobs[item.id]} {navigate} onDownload={downloadCatalogItem} downloadDisabled={catalogDownloadDisabled} />
+                <VideoCard {item} showChannel={false} flat={true} enableCatalogDownload={true} downloadJob={catalogVideoJobs[item.id]} {navigate} onDownload={downloadCatalogItem} downloadDisabled={catalogDownloadDisabled} onDelete={deleteVideoMediaFromCard} deleteDisabled={cardDeleteDisabled} />
               {/each}
             </div>
             <PaginationControls label="Channel video pagination" page={channelPage.pagination.page} last={lastPage(channelPage.pagination)} onPageChange={changeChannelVideosPage} />
@@ -3778,9 +3821,10 @@
           {:else if playlistPage.videos.length === 0}
             <div class="state compact"><strong>No videos on this page.</strong><span>Use pagination to return to available playlist entries.</span></div>
           {:else}
+            {#if deleteVideoMediaCardAction.status === 'error'}<div role="alert" class="job-state compact state-error" data-testid="video-card-delete-status">Could not delete video media: {deleteVideoMediaCardAction.error}</div>{:else if deleteVideoMediaCardAction.status === 'succeeded'}<div role="status" aria-live="polite" class="job-state compact" data-testid="video-card-delete-status">Local video file deleted.</div>{/if}
             <div class="video-grid playlist-grid">
               {#each playlistPage.videos as item (item.id)}
-                <VideoCard {item} showChannel={false} flat={true} enableCatalogDownload={true} downloadJob={catalogVideoJobs[item.id]} {navigate} onDownload={downloadCatalogItem} downloadDisabled={catalogDownloadDisabled} />
+                <VideoCard {item} showChannel={false} flat={true} enableCatalogDownload={true} downloadJob={catalogVideoJobs[item.id]} {navigate} onDownload={downloadCatalogItem} downloadDisabled={catalogDownloadDisabled} onDelete={deleteVideoMediaFromCard} deleteDisabled={cardDeleteDisabled} />
               {/each}
             </div>
             <PaginationControls label="Playlist video pagination" page={playlistPage.pagination.page} last={lastPage(playlistPage.pagination)} onPageChange={changePlaylistVideosPage} />

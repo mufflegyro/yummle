@@ -109,6 +109,20 @@ function mockUpNextVideo(id, title, channelID, publishedAt, options = {}) {
   };
 }
 
+// Grid list endpoints never sign media URLs, so downloaded media is
+// signalled by archive_state alone (mirrors the server's videoListItem).
+function mockGridVideo(id, title, options = {}) {
+  return {
+    id,
+    title,
+    description: 'A deterministic grid delete fixture.',
+    published_at: '2026-05-03T12:00:00Z',
+    duration_seconds: 90,
+    view_count: 3,
+    archive_state: options.catalogOnly ? 'catalog-only' : 'downloaded',
+    channel: { id: 'e2e-channel', name: 'E2E Test Channel' },
+  };
+}
 test('home feed automatically appends the next page', async ({ page }) => {
   const pageRequests = [];
   let releasePage2;
@@ -1990,6 +2004,318 @@ test('watch page confirms before deleting local video media', async ({ page }) =
   await expect(page.locator('video')).toHaveCount(0);
   await expect(page.getByTestId('media-availability')).toContainText('Metadata only');
   await expect(page.getByText('E2E Lunar Archive Smoke')).toBeVisible();
+});
+
+test('library grid deletes video media from the thumbnail overlay', async ({ page }) => {
+  let mediaDeleted = false;
+  let deleteRequests = 0;
+  let releaseLibraryRefresh;
+  const libraryRefreshCanFinish = new Promise(resolve => {
+    releaseLibraryRefresh = resolve;
+  });
+
+  await page.route('**/api/home/videos?*', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/api/home/videos') {
+      await route.continue();
+      return;
+    }
+    if (mediaDeleted) await libraryRefreshCanFinish;
+    await route.fulfill({
+      json: {
+        data: [
+          mockGridVideo('e2e-grid-download-1', 'E2E Grid Download One'),
+          mockGridVideo('e2e-grid-catalog-1', 'E2E Grid Catalog One', { catalogOnly: true }),
+        ].map(video => mediaDeleted && video.id === 'e2e-grid-download-1' ? { ...video, archive_state: 'catalog-only' } : video),
+        pagination: { page: 1, page_size: 50, total: 2 },
+      },
+    });
+  });
+  await page.route('**/api/videos/e2e-grid-download-1/media', async route => {
+    if (route.request().method() !== 'DELETE') {
+      await route.continue();
+      return;
+    }
+    deleteRequests += 1;
+    mediaDeleted = true;
+    await route.fulfill({ status: 204, body: '' });
+  });
+
+  await page.goto('/');
+  const downloadableCard = page.getByTestId('video-card').filter({ hasText: 'E2E Grid Download One' });
+  const catalogCard = page.getByTestId('video-card').filter({ hasText: 'E2E Grid Catalog One' });
+  await expect(downloadableCard.getByTestId('video-card-delete')).toBeVisible();
+  await expect(catalogCard.getByTestId('video-card-delete')).toHaveCount(0);
+
+  // Dismissing the confirmation keeps the media untouched.
+  let dismissedMessage = '';
+  page.once('dialog', async dialog => {
+    dismissedMessage = dialog.message();
+    await dialog.dismiss();
+  });
+  await downloadableCard.getByTestId('video-card-delete').click();
+  expect(dismissedMessage).toContain('Delete the local video file for "E2E Grid Download One"');
+  expect(dismissedMessage).toContain('Metadata, comments, thumbnails, and catalog information will stay.');
+  expect(deleteRequests).toBe(0);
+
+  // Accepting deletes the media and flips the card to catalog-only from
+  // local state while the library refresh is still hanging.
+  const deleteResponse = page.waitForResponse(response => response.url().endsWith('/api/videos/e2e-grid-download-1/media') && response.request().method() === 'DELETE');
+  page.once('dialog', dialog => dialog.accept());
+  await downloadableCard.getByTestId('video-card-delete').click();
+  await deleteResponse;
+  expect(deleteRequests).toBe(1);
+  await expect(downloadableCard.getByTestId('video-card-delete')).toHaveCount(0);
+  await expect(downloadableCard.locator('.thumb')).toHaveClass(/catalog-only/);
+  await expect(downloadableCard.getByRole('link', { name: 'Open metadata for E2E Grid Download One' })).toBeVisible();
+  await expect(page.getByTestId('video-card-delete-status')).toHaveText('Local video file deleted.');
+  releaseLibraryRefresh();
+  // The refreshed grid data still reports catalog-only for the deleted video.
+  await expect(downloadableCard.getByTestId('video-card-delete')).toHaveCount(0);
+  await expect(downloadableCard.locator('.thumb')).toHaveClass(/catalog-only/);
+});
+
+test('grid delete ignores additional clicks while a delete is in flight', async ({ page }) => {
+  let mediaDeleted = false;
+  let deleteRequests = 0;
+  let releaseDelete;
+  const deleteCanFinish = new Promise(resolve => {
+    releaseDelete = resolve;
+  });
+
+  await page.route('**/api/home/videos?*', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/api/home/videos') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      json: {
+        data: [
+          mockGridVideo('e2e-grid-download-1', 'E2E Grid Download One'),
+          mockGridVideo('e2e-grid-download-2', 'E2E Grid Download Two'),
+        ].map(video => mediaDeleted && video.id === 'e2e-grid-download-1' ? { ...video, archive_state: 'catalog-only' } : video),
+        pagination: { page: 1, page_size: 50, total: 2 },
+      },
+    });
+  });
+  await page.route('**/api/videos/e2e-grid-download-1/media', async route => {
+    if (route.request().method() !== 'DELETE') {
+      await route.continue();
+      return;
+    }
+    deleteRequests += 1;
+    mediaDeleted = true;
+    await deleteCanFinish;
+    await route.fulfill({ status: 204, body: '' });
+  });
+
+  await page.goto('/');
+  const firstCard = page.getByTestId('video-card').filter({ hasText: 'E2E Grid Download One' });
+  const secondCard = page.getByTestId('video-card').filter({ hasText: 'E2E Grid Download Two' });
+  await expect(firstCard.getByTestId('video-card-delete')).toBeVisible();
+
+  const dialogs = [];
+  page.on('dialog', async dialog => {
+    dialogs.push(dialog.message());
+    await dialog.accept();
+  });
+
+  const deleteRequest = page.waitForRequest(request => request.url().endsWith('/api/videos/e2e-grid-download-1/media') && request.method() === 'DELETE');
+  await firstCard.getByTestId('video-card-delete').click();
+  await deleteRequest;
+
+  // While the first delete is in flight every overlay disables, so extra
+  // clicks are ignored: no confirmation dialog, no second request.
+  await expect(secondCard.getByTestId('video-card-delete')).toBeDisabled();
+  await secondCard.getByTestId('video-card-delete').click({ force: true });
+  expect(deleteRequests).toBe(1);
+  expect(dialogs).toHaveLength(1);
+
+  releaseDelete();
+  await page.waitForResponse(response => response.url().endsWith('/api/videos/e2e-grid-download-1/media') && response.request().method() === 'DELETE');
+  await expect(firstCard.getByTestId('video-card-delete')).toHaveCount(0);
+  await expect(secondCard.getByTestId('video-card-delete')).toBeEnabled();
+});
+
+test('channel page grid deletes video media from the thumbnail overlay', async ({ page }) => {
+  let mediaDeleted = false;
+  let deleteRequests = 0;
+  let videoLoads = 0;
+
+  await page.route('**/api/channels/e2e-channel', async route => {
+    if (route.request().method() !== 'GET') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({ json: { id: 'e2e-channel', name: 'E2E Test Channel', subscribed: false, video_count: 2, description: '' } });
+  });
+  await page.route('**/api/channels/e2e-channel/videos?*', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/api/channels/e2e-channel/videos') {
+      await route.continue();
+      return;
+    }
+    videoLoads += 1;
+    await route.fulfill({
+      json: {
+        data: [
+          mockGridVideo('e2e-grid-download-1', 'E2E Grid Download One'),
+          mockGridVideo('e2e-grid-catalog-1', 'E2E Grid Catalog One', { catalogOnly: true }),
+        ].map(video => mediaDeleted && video.id === 'e2e-grid-download-1' ? { ...video, archive_state: 'catalog-only' } : video),
+        pagination: { page: 1, page_size: 50, total: 2 },
+      },
+    });
+  });
+  await page.route('**/api/videos/e2e-grid-download-1/media', async route => {
+    if (route.request().method() !== 'DELETE') {
+      await route.continue();
+      return;
+    }
+    deleteRequests += 1;
+    mediaDeleted = true;
+    await route.fulfill({ status: 204, body: '' });
+  });
+
+  await page.goto('/channels/e2e-channel');
+  const downloadableCard = page.getByTestId('video-card').filter({ hasText: 'E2E Grid Download One' });
+  const catalogCard = page.getByTestId('video-card').filter({ hasText: 'E2E Grid Catalog One' });
+  await expect(downloadableCard.getByTestId('video-card-delete')).toBeVisible();
+  await expect(catalogCard.getByTestId('video-card-delete')).toHaveCount(0);
+
+  page.on('dialog', dialog => dialog.accept());
+  await downloadableCard.getByTestId('video-card-delete').click();
+  expect(deleteRequests).toBe(1);
+  await expect(page.getByTestId('video-card-delete-status')).toHaveText('Local video file deleted.');
+  await expect(downloadableCard.getByTestId('video-card-delete')).toHaveCount(0);
+  await expect(downloadableCard.locator('.thumb')).toHaveClass(/catalog-only/);
+  // The channel video list was refetched after the delete.
+  await expect.poll(() => videoLoads).toBe(2);
+});
+
+test('playlist page grid deletes video media from the thumbnail overlay', async ({ page }) => {
+  let mediaDeleted = false;
+  let deleteRequests = 0;
+  let videoLoads = 0;
+
+  await page.route('**/api/playlists/e2e-playlist', async route => {
+    if (route.request().method() !== 'GET') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({ json: { id: 'e2e-playlist', title: 'E2E Grid Playlist', subscribed: false, video_count: 2, description: '' } });
+  });
+  await page.route('**/api/playlists/e2e-playlist/videos?*', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/api/playlists/e2e-playlist/videos') {
+      await route.continue();
+      return;
+    }
+    videoLoads += 1;
+    await route.fulfill({
+      json: {
+        data: [
+          mockGridVideo('e2e-grid-download-1', 'E2E Grid Download One'),
+          mockGridVideo('e2e-grid-catalog-1', 'E2E Grid Catalog One', { catalogOnly: true }),
+        ].map(video => mediaDeleted && video.id === 'e2e-grid-download-1' ? { ...video, archive_state: 'catalog-only' } : video),
+        pagination: { page: 1, page_size: 50, total: 2 },
+      },
+    });
+  });
+  await page.route('**/api/videos/e2e-grid-download-1/media', async route => {
+    if (route.request().method() !== 'DELETE') {
+      await route.continue();
+      return;
+    }
+    deleteRequests += 1;
+    mediaDeleted = true;
+    await route.fulfill({ status: 204, body: '' });
+  });
+
+  await page.goto('/playlists/e2e-playlist');
+  const downloadableCard = page.getByTestId('video-card').filter({ hasText: 'E2E Grid Download One' });
+  const catalogCard = page.getByTestId('video-card').filter({ hasText: 'E2E Grid Catalog One' });
+  await expect(downloadableCard.getByTestId('video-card-delete')).toBeVisible();
+  await expect(catalogCard.getByTestId('video-card-delete')).toHaveCount(0);
+
+  page.on('dialog', dialog => dialog.accept());
+  await downloadableCard.getByTestId('video-card-delete').click();
+  expect(deleteRequests).toBe(1);
+  await expect(page.getByTestId('video-card-delete-status')).toHaveText('Local video file deleted.');
+  await expect(downloadableCard.getByTestId('video-card-delete')).toHaveCount(0);
+  await expect(downloadableCard.locator('.thumb')).toHaveClass(/catalog-only/);
+  // The playlist video list was refetched after the delete.
+  await expect.poll(() => videoLoads).toBe(2);
+});
+
+test('grid delete reports failures inline', async ({ page }) => {
+  await page.route('**/api/home/videos?*', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/api/home/videos') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      json: {
+        data: [mockGridVideo('e2e-grid-download-1', 'E2E Grid Download One')],
+        pagination: { page: 1, page_size: 50, total: 1 },
+      },
+    });
+  });
+  await page.route('**/api/videos/e2e-grid-download-1/media', async route => {
+    if (route.request().method() !== 'DELETE') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({ status: 500, json: { error: 'media file missing' } });
+  });
+
+  await page.goto('/');
+  const card = page.getByTestId('video-card').filter({ hasText: 'E2E Grid Download One' });
+  await expect(card.getByTestId('video-card-delete')).toBeVisible();
+
+  page.on('dialog', dialog => dialog.accept());
+  await card.getByTestId('video-card-delete').click();
+  await expect(page.getByTestId('video-card-delete-status')).toContainText('Could not delete video media: media file missing');
+  // The card keeps its overlay so the delete can be retried.
+  await expect(card.getByTestId('video-card-delete')).toBeVisible();
+  await expect(card.locator('.thumb')).not.toHaveClass(/catalog-only/);
+});
+
+test('search result tiles show no delete overlay', async ({ page }) => {
+  await page.goto('/search?q=lunar');
+  await expect(page.getByText('E2E Lunar Archive Smoke').first()).toBeVisible();
+  await expect(page.locator('.search-episode-grid').getByTestId('video-card-delete')).toHaveCount(0);
+  await expect(page.locator('.thumb-delete')).toHaveCount(0);
+});
+
+test('thumbnail delete overlay reveals on hover and stays visible on touch', async ({ page }) => {
+  await page.route('**/api/home/videos?*', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/api/home/videos') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      json: {
+        data: [mockGridVideo('e2e-grid-download-1', 'E2E Grid Download One')],
+        pagination: { page: 1, page_size: 50, total: 1 },
+      },
+    });
+  });
+
+  await page.goto('/');
+  const overlay = page.getByTestId('video-card').filter({ hasText: 'E2E Grid Download One' }).getByTestId('video-card-delete');
+  await expect(overlay).toBeVisible();
+  const overlayOpacity = () => overlay.evaluate(element => Number(getComputedStyle(element).opacity));
+  if (await page.evaluate(() => window.matchMedia('(hover: none)').matches)) {
+    // Touch devices have no hover state: the overlay is always visible.
+    await expect.poll(overlayOpacity).toBe(1);
+    return;
+  }
+  await expect.poll(overlayOpacity).toBe(0);
+  await overlay.hover();
+  await expect.poll(overlayOpacity).toBe(1);
 });
 
 test('watch page keeps played state after stale progress completes', async ({ page }) => {
