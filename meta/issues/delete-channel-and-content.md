@@ -24,3 +24,7 @@
 - Root cause: the old guard checked for *any* video row, but catalog scans store metadata rows with empty `media_path`, so every imported channel appeared "non-empty".
 - The delete does not remove files from disk (it refuses when media exists), so no media-root cleanup is needed.
 - Frontend: Remove channel buttons on the channel list and channel detail page; existing backend route is reused.
+
+## See also
+
+- **`cascade-delete-channel-archive.md`** ("Delete a channel subscription and its archived content") — the follow-on that extends this 204 catalog-only path into a full confirmed cascade (content + files + tombstone). Choose this distinct name so the two issues do not sit adjacent in `meta/issues.md` as near-identical strings.
