@@ -16,6 +16,7 @@ DEVLOG.md
 # Go
 coverage.out
 bin/
+.gocache/
 
 # Frontend
 node_modules/
@@ -23,6 +24,7 @@ dist/
 build/
 frontend/playwright-report/
 frontend/test-results/
+.pnpm-store/
 
 # Local data
 data/
