@@ -40,3 +40,4 @@
 - [ ] [Delete a channel subscription and its archived content](issues/cascade-delete-channel-archive.md)
 - [ ] [Hide the search bar on mobile when scrolling down on the video player page](issues/hide-search-bar-on-mobile-watch.md)
 - [ ] [Bound job error output and summarize non-failed job errors](issues/bound-job-error-output.md)
+- [ ] [Add a searchable watch history list view](issues/add-searchable-watch-history-view.md)
