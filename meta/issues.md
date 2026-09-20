@@ -41,3 +41,6 @@
 - [ ] [Hide the search bar on mobile when scrolling down on the video player page](issues/hide-search-bar-on-mobile-watch.md)
 - [ ] [Bound job error output and summarize non-failed job errors](issues/bound-job-error-output.md)
 - [ ] [Add a searchable watch history list view](issues/add-searchable-watch-history-view.md)
+- [ ] [Surface YouTube cookie status in settings](issues/surface-youtube-cookies-status-in-settings.md)
+- [ ] [Client capabilities endpoint for the save userscript](issues/add-client-capabilities-endpoint.md)
+- [ ] [Mark YouTube videos watched on save (server-side yt-dlp)](issues/mark-youtube-videos-watched-on-save.md)
