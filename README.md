@@ -73,7 +73,7 @@ Common settings:
 - `KAPSEL_SESSION_SECRET`: secret used to sign login sessions.
 - `KAPSEL_MEDIA_SIGNING_SECRET`: secret used to sign media URLs.
 - `KAPSEL_YTDLP_PATH`: path to `yt-dlp`, default `yt-dlp`.
-- `KAPSEL_YTDLP_COOKIES_FILE`: optional Netscape `cookies.txt` path for authenticated `yt-dlp` requests. Treat it like a password and keep it outside the repo.
+- `KAPSEL_YTDLP_COOKIES_FILE`: optional Netscape `cookies.txt` path for authenticated `yt-dlp` requests. Treat it like a password and keep it outside the repo. The Settings page reports the file's status (configured, readable, signed-in session, earliest auth-cookie expiry — a readiness check warns once the session has fewer than 14 days left) and offers a rate-limited (120s cooldown) `POST /api/settings/test-youtube-cookies` probe that runs one real yt-dlp request to prove the session is live.
 - `KAPSEL_YTDLP_SLEEP_INTERVAL`: randomized pacing between yt-dlp calls, default `10s`.
 - `KAPSEL_YTDLP_UPDATE_INTERVAL`: how often to auto-update `yt-dlp` to the latest nightly, default `24h`. Set to `0s` to disable automatic updates.
 - `KAPSEL_FFMPEG_PATH`: path to `ffmpeg`, default `ffmpeg`.
@@ -137,6 +137,8 @@ curl -X POST http://127.0.0.1:8080/api/channels \
 ```
 
 If auth is enabled, authenticate in the browser first or provide the session cookie to API requests.
+
+`POST /api/downloads` accepts an optional `mark_watched` flag (`{"url":…, "mark_watched":true}`, used by the Yummle save userscript): when set, the download adds `--mark-watched` so yt-dlp records the video in your YouTube watch history during extraction — but only if the configured cookies file has a signed-in session at command-build time. With inactive cookies the download still proceeds and the job result records `mark_watched: "skipped"` plus the reason. Bulk flows (channels, scans, auto-downloads) never mark. A database-side caveat is accepted: a download that later fails can still leave the video watched.
 
 ## Importing Subscriptions
 

@@ -77,3 +77,23 @@ flag itself is always sent and the server enforces the cookie prerequisite
 ## Blocked by
 
 - `surface-youtube-cookies-status-in-settings`
+## Implementation notes (2026-09-20, pending sign-off)
+
+- `GET /api/capabilities` registered whenever the cookies diagnostics are wired
+  (i.e. the server is configured with the cookie path), auth-gated via
+  `requireAuth`. Computes only `download.CheckCookies` — no probe, no storage
+  scan, no diskspace walk. Response: `{"mark_watched": {"available": bool,
+  "reason": string|null}}` (`Reason *string`, null when available).
+- Route registration made independent of `settingsStatus` so the cheap
+  capabilities surface works even where the heavy settings endpoint is off
+  (`NewHandler(WithCookiesDiagnostics(...))`).
+- Userscript (userscript worktree, `scripts/yummle-save.user.js`, v0.4.2):
+  fetches `/api/capabilities` once per page (in-memory, not per thumbnail),
+  degrades to "unknown" on failure, save POST now sends
+  `{"url", "mark_watched": true}` always, save-button title reflects
+  availability/reason, and `__yummleSave.debug()` exposes `capabilities`.
+  Note: the userscript branch is still ~62 commits behind main; merge main in
+  at commit time when the main line lands.
+- Tests: `TestCapabilitiesEndpointReflectsCookieStatus` (available + unconfigured
+  reason). Live-verified against 127.0.0.1:18080 with cookies configured →
+  `{"mark_watched":{"available":true,"reason":null}}`.

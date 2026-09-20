@@ -35,7 +35,21 @@ func (d *Downloader) handlePayload(ctx context.Context, jobID string, payloadJSO
 		return ingestResult{}, err
 	}
 
-	command, err := d.BuildCommand(downloadURL)
+	// markApplied is decided once at command-build time, before the download
+	// runs: applied when --mark-watched is on the command, skipped (with the
+	// reason) when the cookies check failed. The download proceeds either way.
+	markStatus := ""
+	markSkipReason := ""
+	markWatched := payload.MarkWatched
+	if markWatched {
+		if d.cookiesActive() {
+			markStatus = "applied"
+		} else {
+			markStatus = "skipped"
+			markSkipReason = d.cookiesSkipReason()
+		}
+	}
+	command, err := d.BuildCommand(downloadURL, markWatched && markStatus == "applied")
 	if err != nil {
 		return ingestResult{}, err
 	}
@@ -87,7 +101,7 @@ func (d *Downloader) handlePayload(ctx context.Context, jobID string, payloadJSO
 				return ingestResult{}, ytdlpJobError(command, output, err)
 			}
 			slog.Warn("original automatic subtitle download failed", "video_id", downloadedMetadata.ID, "job_id", jobID, "error", SanitizeDiagnosticText(ytdlpCommandError(command, output, err).Error()))
-			return d.ingest(ctx, downloadedMetadata, downloadURL, payloadJSON, jobID, downloadOrigin(payload.Origin))
+			return d.ingest(ctx, downloadedMetadata, downloadURL, payloadJSON, jobID, downloadOrigin(payload.Origin), markStatus, markSkipReason)
 		}
 		automaticMetadata, err := parseDownloadMetadataOutput(output, false)
 		if err != nil {
@@ -96,7 +110,7 @@ func (d *Downloader) handlePayload(ctx context.Context, jobID string, payloadJSO
 		mergeRequestedSubtitles(&downloadedMetadata, automaticMetadata.RequestedSubtitles)
 	}
 
-	return d.ingest(ctx, downloadedMetadata, downloadURL, payloadJSON, jobID, downloadOrigin(payload.Origin))
+	return d.ingest(ctx, downloadedMetadata, downloadURL, payloadJSON, jobID, downloadOrigin(payload.Origin), markStatus, markSkipReason)
 }
 
 type metadata struct {
@@ -152,8 +166,10 @@ type validatedSubtitle struct {
 }
 
 type ingestResult struct {
-	VideoID string `json:"video_id"`
-	Action  string `json:"action"`
+	VideoID               string `json:"video_id"`
+	Action                string `json:"action"`
+	MarkWatched           string `json:"mark_watched,omitempty"`
+	MarkWatchedSkipReason string `json:"mark_watched_skip_reason,omitempty"`
 }
 
 func hasOriginalAutomaticSubtitles(value metadata) bool {
@@ -178,7 +194,7 @@ func mergeRequestedSubtitles(target *metadata, subtitles map[string]subtitleMeta
 	}
 }
 
-func (d *Downloader) ingest(ctx context.Context, metadata metadata, rawURL string, payloadJSON string, jobID string, origin string) (ingestResult, error) {
+func (d *Downloader) ingest(ctx context.Context, metadata metadata, rawURL string, payloadJSON string, jobID string, origin string, markStatus string, markSkipReason string) (ingestResult, error) {
 	validated, err := d.validateMetadata(metadata)
 	if err != nil {
 		return ingestResult{}, err
@@ -201,7 +217,7 @@ func (d *Downloader) ingest(ctx context.Context, metadata metadata, rawURL strin
 	if err != nil {
 		return ingestResult{}, err
 	}
-	result := ingestResult{VideoID: videoID, Action: "created"}
+	result := ingestResult{VideoID: videoID, Action: "created", MarkWatched: markStatus, MarkWatchedSkipReason: markSkipReason}
 	if exists {
 		result.Action = "updated"
 	}

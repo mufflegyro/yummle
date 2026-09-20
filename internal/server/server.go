@@ -77,6 +77,10 @@ type config struct {
 	ytdlpPath              string
 	ytdlpRunner            download.Runner
 	ytdlpStatus            bool
+	cookiesFile            string
+	cookiesRunner          download.Runner
+	cookiesStatus          bool
+	cookiesProbe           *download.CookiesProbeState
 	auth                   *kapselauth.Manager
 	loginLimiter           *loginLimiter
 	settingsDiagnostics    SettingsDiagnostics
@@ -175,6 +179,7 @@ type SettingsDiagnostics struct {
 	SponsorBlockEnabled          bool
 	FFMPEGPath                   string
 	YTDLPPath                    string
+	YTDLPCookiesFile             string
 }
 
 func WithDatabase(db *sql.DB) Option {
@@ -214,6 +219,14 @@ func WithYTDLPDiagnostics(path string, runner download.Runner) Option {
 		config.ytdlpPath = path
 		config.ytdlpRunner = runner
 		config.ytdlpStatus = true
+	}
+}
+
+func WithCookiesDiagnostics(path string, runner download.Runner) Option {
+	return func(config *config) {
+		config.cookiesFile = path
+		config.cookiesRunner = runner
+		config.cookiesStatus = true
 	}
 }
 
@@ -281,6 +294,13 @@ func NewHandler(options ...Option) http.Handler {
 	}
 	if config.db != nil || config.mediaRoot != "" || config.ytdlpStatus || config.storageStatus {
 		mux.HandleFunc("GET /api/diagnostics/readiness", requireAuth(config, diagnosticsReadiness(config)))
+	}
+	if config.cookiesStatus {
+		if config.cookiesProbe == nil {
+			config.cookiesProbe = download.NewCookiesProbeState()
+		}
+		mux.HandleFunc("POST /api/settings/test-youtube-cookies", requireAuth(config, testYouTubeCookies(config)))
+		mux.HandleFunc("GET /api/capabilities", requireAuth(config, getCapabilities(config)))
 	}
 	if config.settingsStatus {
 		mux.HandleFunc("GET /api/settings", requireAuth(config, getSettings(config)))
@@ -719,6 +739,7 @@ type settingsResponse struct {
 	Configuration      settingsConfiguration    `json:"configuration"`
 	Checks             []settingsReadinessCheck `json:"checks"`
 	YTDLP              *download.YTDLPStatus    `json:"yt_dlp,omitempty"`
+	Cookies            *download.CookiesStatus  `json:"cookies,omitempty"`
 	Storage            *diskspace.Report        `json:"storage,omitempty"`
 	StorageMaintenance *storage.Summary         `json:"storage_maintenance,omitempty"`
 	Updates            *updater.StatusSummary   `json:"updates,omitempty"`
@@ -740,6 +761,7 @@ type settingsConfiguration struct {
 	SponsorBlockEnabled          bool   `json:"sponsorblock_enabled"`
 	FFMPEGPath                   string `json:"ffmpeg_path"`
 	YTDLPPath                    string `json:"yt_dlp_path"`
+	YTDLPCookiesFile             string `json:"ytdlp_cookies_file"`
 }
 
 type settingsReadinessCheck struct {
@@ -775,7 +797,18 @@ func getSettings(config config) http.HandlerFunc {
 				response.Updates = &summary
 			}
 		}
-		response.Checks = settingsChecks(config.settingsDiagnostics, response.YTDLP, response.Storage)
+		if config.cookiesStatus {
+			status := download.CheckCookies(config.cookiesFile)
+			if config.cookiesProbe != nil {
+				if cached := config.cookiesProbe.Cached(); cached.LastProbe != nil {
+					status.Verified = cached.Verified
+					status.LastProbe = cached.LastProbe
+					status.ProbeError = cached.ProbeError
+				}
+			}
+			response.Cookies = &status
+		}
+		response.Checks = settingsChecks(config.settingsDiagnostics, response.YTDLP, response.Storage, response.Cookies)
 		if config.updater != nil && response.Updates != nil {
 			// The update state is the most actionable check — a pending offer
 			// or a failed release check needs a decision — so it leads the list.
@@ -803,10 +836,11 @@ func settingsConfigurationFromDiagnostics(settings SettingsDiagnostics) settings
 		SponsorBlockEnabled:          settings.SponsorBlockEnabled,
 		FFMPEGPath:                   settings.FFMPEGPath,
 		YTDLPPath:                    settings.YTDLPPath,
+		YTDLPCookiesFile:             settings.YTDLPCookiesFile,
 	}
 }
 
-func settingsChecks(settings SettingsDiagnostics, ytdlp *download.YTDLPStatus, storage *diskspace.Report) []settingsReadinessCheck {
+func settingsChecks(settings SettingsDiagnostics, ytdlp *download.YTDLPStatus, storage *diskspace.Report, cookies *download.CookiesStatus) []settingsReadinessCheck {
 	checks := []settingsReadinessCheck{
 		mediaSigningCheck(settings.MediaSigningSecretConfigured),
 		authenticationCheck(settings),
@@ -814,6 +848,9 @@ func settingsChecks(settings SettingsDiagnostics, ytdlp *download.YTDLPStatus, s
 	}
 	if ytdlp != nil {
 		checks = append(checks, ytdlpSettingsCheck(*ytdlp))
+	}
+	if cookies != nil {
+		checks = append(checks, youtubeCookiesSettingsCheck(*cookies))
 	}
 	if storage != nil {
 		checks = append(checks, storageSettingsCheck(*storage))

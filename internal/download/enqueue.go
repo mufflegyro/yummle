@@ -12,7 +12,12 @@ import (
 type Payload struct {
 	URL      string `json:"url"`
 	Origin   string `json:"origin,omitempty"`
-	ScanOnly bool   `json:"scan_only,omitempty"`
+	ScanOnly bool `json:"scan_only,omitempty"`
+	// MarkWatched requests that yt-dlp mark the video watched on YouTube
+	// during the download (--mark-watched). Only the direct-video flow (the
+	// userscript) sets it; bulk flows never do. The server only adds the flag
+	// when the cookies check passes at command-build time.
+	MarkWatched bool `json:"mark_watched,omitempty"`
 }
 
 func NormalizeDownloadPayload(payload Payload) (Payload, error) {

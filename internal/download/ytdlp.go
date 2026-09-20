@@ -61,6 +61,9 @@ type Command struct {
 	Network        sandbox.NetworkPolicy
 	MaxStdoutBytes int
 	Progress       func(float64) error
+	// CaptureStderr merges stderr into the returned output on success too, so
+	// diagnostics probes can read yt-dlp's verbose confirmation lines.
+	CaptureStderr bool
 }
 
 type Runner interface {
@@ -292,7 +295,22 @@ func parsePremiereDelay(text string) (time.Duration, bool) {
 	return delay + DefaultPremiereBuffer, true
 }
 
-func (d *Downloader) BuildCommand(rawURL string) (Command, error) {
+// cookiesActive reports whether the configured cookies file is usable for
+// authenticated flags such as --mark-watched: configured + readable + a
+// signed-in session, evaluated at command-build time (cheap static check,
+// no network).
+func (d *Downloader) cookiesActive() bool {
+	return CheckCookies(d.config.YTDLPCookiesFile).Available()
+}
+
+// cookiesSkipReason explains why --mark-watched was skipped: the shared
+// CookiesStatus wording, so the job-skip reason cannot drift from the probe
+// and capability surfaces.
+func (d *Downloader) cookiesSkipReason() string {
+	return CheckCookies(d.config.YTDLPCookiesFile).UnavailableReason()
+}
+
+func (d *Downloader) BuildCommand(rawURL string, markWatched bool) (Command, error) {
 	downloadURL, err := NormalizeDownloadURL(rawURL)
 	if err != nil {
 		return Command{}, err
@@ -317,6 +335,9 @@ func (d *Downloader) BuildCommand(rawURL string) (Command, error) {
 		"--output", "%(id)s.%(ext)s",
 		downloadURL,
 	)
+	if markWatched && d.cookiesActive() {
+		args = append(args, "--mark-watched")
+	}
 	if d.config.SubtitlesEnabled {
 		args = append(args,
 			"--write-subs",

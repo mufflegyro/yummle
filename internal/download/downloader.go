@@ -138,6 +138,9 @@ func (r ExecRunner) Run(ctx context.Context, command Command) ([]byte, error) {
 	if progress.err != nil {
 		return combinedOutput(stdout.CappedBytes(maxErrorOutput), stderr.Bytes()), progress.err
 	}
+	if command.CaptureStderr {
+		return combinedOutput(stdout.Bytes(), stderr.Bytes()), nil
+	}
 
 	return stdout.Bytes(), nil
 }

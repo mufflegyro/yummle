@@ -204,6 +204,7 @@
   let searchPage = { status: 'idle', query: '', results: [], distinctOwners: null, offset: 0, hasMore: false, loadingMore: false, loadMoreError: '', error: '' };
   let commentsPage = { status: 'idle', videoID: '', comments: [], pagination: { page: 1, page_size: 20, total: 0 }, error: '' };
   let diagnostics = { status: 'idle', readiness: null, error: '' };
+  let cookiesProbe = { status: 'idle', result: null, error: '', retryAfter: 0, cooldown: 0 };
   let updates = { status: 'idle', summary: null, error: '' };
   let jobsPage = { status: 'idle', filter: 'all', jobs: [], pagination: { page: 1, page_size: 20, total: 0 }, error: '' };
   let jobAction = { id: '', action: '', error: '' };
@@ -918,6 +919,39 @@
       if (requestToken !== diagnosticsRequestToken) return;
       diagnostics = { status: 'error', readiness: null, error: error.message };
     }
+  }
+
+  async function testYouTubeCookies() {
+    if (cookiesProbe.status === 'loading' || cookiesProbe.cooldown > 0) return;
+    cookiesProbe = { ...cookiesProbe, status: 'loading', error: '', result: null, retryAfter: 0 };
+    try {
+      const response = await fetch('/api/settings/test-youtube-cookies', { method: 'POST', headers: { Accept: 'application/json' } });
+      if (!response.ok) {
+        if (response.status === 429) {
+          const retryAfter = Number(response.headers.get('Retry-After')) || 120;
+          cookiesProbe = { status: 'error', result: null, error: `Rate limited — try again in ${retryAfter} seconds.`, retryAfter, cooldown: retryAfter };
+          startCookiesCooldown();
+          return;
+        }
+        throw new Error(await responseErrorMessage(response));
+      }
+      const result = await response.json();
+      cookiesProbe = { status: 'loaded', result, error: '', retryAfter: 0, cooldown: 120 };
+      startCookiesCooldown();
+      loadDiagnostics();
+    } catch (error) {
+      cookiesProbe = { status: 'error', result: null, error: error.message, retryAfter: 0, cooldown: 120 };
+      startCookiesCooldown();
+    }
+  }
+
+  let cookiesCooldownTimer;
+  function startCookiesCooldown() {
+    clearInterval(cookiesCooldownTimer);
+    cookiesCooldownTimer = setInterval(() => {
+      cookiesProbe = { ...cookiesProbe, cooldown: Math.max(0, cookiesProbe.cooldown - 1) };
+      if (cookiesProbe.cooldown <= 0) clearInterval(cookiesCooldownTimer);
+    }, 1000);
   }
 
   async function loadUpdates() {
@@ -3436,6 +3470,7 @@ Metadata, comments, thumbnails, and catalog information will stay.`);
       { label: 'Media root', value: config.media_root || 'Not configured' },
       { label: 'TubeArchivist import root', value: config.import_root || 'API imports disabled' },
       { label: 'yt-dlp path', value: config.yt_dlp_path || 'yt-dlp' },
+      { label: 'YouTube cookies', value: cookiesRowLabel(readiness.cookies) },
       { label: 'Media signing', value: config.media_signing_configured ? 'Stable secret configured' : 'Generated per process' },
       { label: 'Authentication', value: config.auth_mode === 'disabled' ? 'Disabled for development' : (config.authentication_configured ? 'Configured' : 'Not configured') },
       { label: 'Session secret', value: config.session_secret_configured ? 'Stable secret configured' : 'Generated per process' },
@@ -3443,6 +3478,15 @@ Metadata, comments, thumbnails, and catalog information will stay.`);
       { label: 'Timeline previews', value: config.previews_enabled ? `Enabled with ${config.ffmpeg_path || 'no ffmpeg path'}` : 'Disabled' },
       { label: 'SponsorBlock', value: config.sponsorblock_enabled ? 'Enabled' : 'Disabled' },
     ];
+  }
+
+  function cookiesRowLabel(cookies) {
+    if (!cookies?.configured) return 'Not configured';
+    if (!cookies.readable) return 'Unreadable';
+    if (!cookies.auth_cookies) return 'No signed-in session';
+    if (cookies.verified) return 'Signed-in session (verified)';
+
+    return 'Signed-in session';
   }
 
   function storageMaintenanceRows(summary) {
@@ -4018,7 +4062,7 @@ Metadata, comments, thumbnails, and catalog information will stay.`);
           </section>
         {:else if path === '/settings'}
           <SettingsUpdatesPanel updates={updates.summary} loadUpdates={loadUpdates} fetchJSON={fetchJSON} onJobCreated={handleUpdateJobCreated} formatJobTime={formatJobTime} />
-          <SettingsDiagnosticsPanel {diagnostics} {loadDiagnostics} {settingsRows} {checkStateLabel} {formatBytes} {storageMaintenanceRows} />
+          <SettingsDiagnosticsPanel {diagnostics} {loadDiagnostics} {settingsRows} {checkStateLabel} {formatBytes} {storageMaintenanceRows} {cookiesProbe} testCookies={testYouTubeCookies} />
         {/if}
       </section>
     {/if}

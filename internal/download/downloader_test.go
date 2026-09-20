@@ -26,7 +26,7 @@ func TestBuildCommand(t *testing.T) {
 	t.Parallel()
 
 	downloader := NewDownloader(nil, Config{YTDLPPath: "yt-dlp", MediaRoot: "/archive/media", SubtitlesEnabled: true}, nil)
-	command, err := downloader.BuildCommand("https://www.youtube.com/watch?v=abc123DEF45")
+	command, err := downloader.BuildCommand("https://www.youtube.com/watch?v=abc123DEF45", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestBuildCommandsUseConfiguredCookiesFile(t *testing.T) {
 
 	downloader := NewDownloader(nil, Config{YTDLPPath: "yt-dlp", MediaRoot: "/archive/media", YTDLPCookiesFile: "/etc/kapsel/youtube.cookies.txt", SubtitlesEnabled: true}, nil)
 	commands := []Command{}
-	video, err := downloader.BuildCommand("https://www.youtube.com/watch?v=abc123DEF45")
+	video, err := downloader.BuildCommand("https://www.youtube.com/watch?v=abc123DEF45", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestBuildCommandsResolveRelativeSandboxPaths(t *testing.T) {
 	wantCookiesFile := filepath.Join(root, cookiesFile)
 	downloader := NewDownloader(nil, Config{YTDLPPath: "yt-dlp", MediaRoot: mediaRoot, YTDLPCookiesFile: cookiesFile, SubtitlesEnabled: true}, nil)
 
-	video, err := downloader.BuildCommand("https://www.youtube.com/watch?v=abc123DEF45")
+	video, err := downloader.BuildCommand("https://www.youtube.com/watch?v=abc123DEF45", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestBuildCommandsIgnoreImplicitYTDLPConfig(t *testing.T) {
 
 	downloader := NewDownloader(nil, Config{YTDLPPath: "yt-dlp", MediaRoot: "/archive/media"}, nil)
 	commands := []Command{}
-	video, err := downloader.BuildCommand("https://www.youtube.com/watch?v=abc123DEF45")
+	video, err := downloader.BuildCommand("https://www.youtube.com/watch?v=abc123DEF45", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,7 +540,7 @@ func TestBuildCommandUsesConfiguredFormatSelector(t *testing.T) {
 	t.Parallel()
 
 	downloader := NewDownloader(nil, Config{YTDLPPath: "yt-dlp", MediaRoot: "/archive/media", FormatSelector: "best[height<=480]"}, nil)
-	command, err := downloader.BuildCommand("https://www.youtube.com/watch?v=abc123DEF45")
+	command, err := downloader.BuildCommand("https://www.youtube.com/watch?v=abc123DEF45", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +552,7 @@ func TestBuildCommandRejectsUnsupportedURLScheme(t *testing.T) {
 	t.Parallel()
 
 	downloader := NewDownloader(nil, Config{YTDLPPath: "yt-dlp", MediaRoot: "/archive/media"}, nil)
-	if _, err := downloader.BuildCommand("file:///etc/passwd"); !errors.Is(err, ErrUnsupportedURLScheme) {
+	if _, err := downloader.BuildCommand("file:///etc/passwd", false); !errors.Is(err, ErrUnsupportedURLScheme) {
 		t.Fatalf("expected unsupported scheme error, got %v", err)
 	}
 }
@@ -561,7 +561,7 @@ func TestBuildCommandRejectsNonYouTubeURL(t *testing.T) {
 	t.Parallel()
 
 	downloader := NewDownloader(nil, Config{YTDLPPath: "yt-dlp", MediaRoot: "/archive/media"}, nil)
-	if _, err := downloader.BuildCommand("https://example.com/watch?v=abc"); !errors.Is(err, ErrUnsupportedVideoURL) {
+	if _, err := downloader.BuildCommand("https://example.com/watch?v=abc", false); !errors.Is(err, ErrUnsupportedVideoURL) {
 		t.Fatalf("expected unsupported video URL error, got %v", err)
 	}
 }

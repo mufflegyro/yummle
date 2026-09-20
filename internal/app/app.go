@@ -118,9 +118,11 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			SponsorBlockEnabled:          cfg.SponsorBlockEnabled,
 			FFMPEGPath:                   cfg.FFMPEGPath,
 			YTDLPPath:                    cfg.YTDLPPath,
+			YTDLPCookiesFile:             cfg.YTDLPCookiesFile,
 		}),
 		server.WithSupportedSchemaVersion(supportedSchemaVersion),
 		server.WithYTDLPDiagnostics(cfg.YTDLPPath, nil),
+		server.WithCookiesDiagnostics(cfg.YTDLPCookiesFile, nil),
 		server.WithStorageDiagnostics(cfg.DataDir, cfg.MediaRoot, cfg.MinFreeSpaceBytes, nil),
 	}
 	if cfg.SponsorBlockEnabled {

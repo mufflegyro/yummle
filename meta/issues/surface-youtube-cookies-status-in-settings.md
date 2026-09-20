@@ -63,11 +63,13 @@ type CookiesStatus struct {
   `ParseError`.
 - parse the Netscape format
   (`domain \t includeSubdomains \t path \t secure \t expiry \t name \t value`).
-- signed-in detection: auth cookie names `SID`, `__Secure-1PSID`,
-  `__Secure-3PSID`, `SAPISID`, `__Secure-1PAPISID`, `__Secure-3PAPISID` whose
-  domain is `.youtube.com` or `.google.com` — matches what
-  `scripts/export-cookies.sh` writes. `Expiry` = earliest `expires` epoch
-  among those (skip `0` = session cookie → no expiry).
+- signed-in detection: mirrors yt-dlp's `_has_auth_cookies` (youtube
+  _base.py) — require `LOGIN_INFO` AND at least one SAPISID-family cookie
+  (`SAPISID`, `__Secure-1PAPISID`, `__Secure-3PAPISID`) whose domain is
+  `.youtube.com` or `.google.com`. SID/1PSID-family cookies are parsed but
+  never satisfy the gate (yt-dlp ignores them). `Expiry` = earliest
+  `expires` epoch among the auth-relevant cookies (skip `0` = session
+  cookie → no expiry).
 - no network I/O; safe to run per request.
 
 ### Settings surface
@@ -133,3 +135,50 @@ type CookiesStatus struct {
   it in the env example.
 - `Path` is exposed like the other roots (auth-gated settings response) —
   the path, never the file contents.
+## Implementation notes (2026-09-20, pending sign-off)
+
+- `internal/download/cookies.go` (new file): `CookiesStatus` (static fields +
+  probe cache fields), `CheckCookies(path)` (read + parse the Netscape format;
+  auth-cookie names per spec; earliest positive expiry), `CheckCookiesLive(ctx,
+  ytdlpPath, cookiesPath, runner)` (subscriptions-feed probe with marker check),
+  and `CookiesProbeState` — an exported in-process limiter+cache (120s
+  cooldown; `Allow` claims the slot so concurrent probes cannot bypass it).
+- Deviation: `Expiry`/`LastProbe` are `time.Time` (zero value omitted by
+  encoding as zero timestamp in practice) rather than spec's point-style
+  omitempty — `omitempty` is a no-op for structs, so the zero value is used.
+  `Expiry time.Time` in `CookiesStatus` is currently serialized even when zero;
+  frontend handles falsy check. Left simple for v1.
+- Probe pass = exit 0 and yt-dlp's verbose output containing
+  `[youtube] Extracted SAPISID cookie`. Error: `ytdlpCommandError` text.
+- Ready-check states implemented per the table; the pass detail reflects the
+  last probe ("Verified against YouTube." / "Latest probe did not pass: …").
+- `POST /api/settings/test-youtube-cookies`: auth-gated, 120s in-process
+  limiter, `Retry-After` header on 429, result cached and surfaced by
+  `GET /api/settings`. Command shape: `yt-dlp --ignore-config --cookies <file>
+  --verbose --simulate --flat-playlist --print "%(id)s"
+  https://www.youtube.com/feed/subscriptions`.
+- Frontend: settings row "YouTube cookies", runtime-details block (path,
+  signed-in, expiry, last probe, probe error) and a "Test YouTube cookies"
+  button with a live cooldown countdown in `SettingsDiagnosticsPanel.svelte`.
+- Env example: documented the 14-day expiry warning window (monthly re-export
+  cadence). README: documented the settings surface and probe endpoint.
+- Tests: `internal/download/cookies_test.go` (parsing fixtures, probe with
+  injected runner, limiter) and `internal/server/cookies_test.go` (settings
+  variants + probe verify/fail/rate-limit with injected runner). `go test ./...`
+  green; `pnpm --dir frontend build` green.
+
+## Review fixes (2026-09-20, second pass)
+
+- Gate aligned with yt-dlp `_has_auth_cookies`: `LOGIN_INFO` AND a
+  SAPISID-family cookie; SID/1PSID family dropped from the gate. Fixture tests
+  for SID-only, SAPISID-without-LOGIN_INFO (both rejected), and the accepted
+  pair. Issue Design table updated to match (above replacement applied).
+- `CookiesStatus.UnavailableReason()` is now the single source of truth for
+  the "why unavailable" wording; `probeSkipReason` and the server capability
+  switch were deleted (drift risk closed).
+- `Expiry`/`LastProbe` became `*time.Time` with `omitempty` — zero values are
+  omitted from JSON, no more "1/1/0001" in the panel.
+- The expiry-warn branch requires a non-nil expiry (session-only auth cookies
+  no longer warn "expires in 0 days") and now uses the exported
+  `download.CookiesExpiryWarnWindow` constant instead of a hardcoded 14.
+- `parseInt64Field` delegates to `strconv.ParseInt`.

@@ -81,3 +81,26 @@ recorded on the job so the UI can say why.
 
 - `surface-youtube-cookies-status-in-settings`
 - `add-client-capabilities-endpoint`
+## Implementation notes (2026-09-20, pending sign-off)
+
+- `download.Payload` gained `MarkWatched bool json:"mark_watched,omitempty"`
+  (only the direct-video flow sets it; `NormalizeDownloadPayload` passes it
+  through untouched, so channel/playlist/auto flows are untouched).
+- `BuildCommand(rawURL string, markWatched bool)`: appends `--mark-watched`
+  only when requested and `d.cookiesActive()` (static
+  `CheckCookies().Available()` — configured + readable + signature cookies).
+  Nowhere else builds download commands this way, so bulk flows can't leak
+  the flag.
+- Skip handling: `handlePayload` decides once at command-build time — applied
+  or skipped with `d.cookiesSkipReason()` — and both statuses flow through
+  `ingest()` (including the subtitle-fallback path) into the job result:
+  `mark_watched: "applied"|"skipped"` + `mark_watched_skip_reason` on the
+  ingest result JSON, surfaced on the job row (Downloads page reads job
+  results as-is).
+- README documents the flag and the accepted costs (failed download can still
+  mark; no retry/repair of partial progress).
+- Tests: `TestBuildCommandMarkWatchedGating` (flag exactly when requested &&
+  active; cookies omitted otherwise), `TestNormalizeDownloadPayloadPreservesMarkWatched`,
+  `TestDownloadJobRecordsMarkWatchedSkipReason` (injected runner, missing
+  cookies file → job succeeds and result says skipped with reason).
+  `TestBuildCommand` etc. updated for the new signature. `go test ./...` green.

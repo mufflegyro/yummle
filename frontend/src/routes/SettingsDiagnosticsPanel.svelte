@@ -8,6 +8,8 @@
     checkStateLabel = value => value || 'Unknown',
     formatBytes = value => String(value ?? 0),
     storageMaintenanceRows = () => [],
+    cookiesProbe = { status: 'idle', result: null, error: '', cooldown: 0 },
+    testCookies = noop,
   } = $props();
 
   let diagnosticsCopyStatus = $state('');
@@ -101,9 +103,28 @@
       {/each}
     </section>
 
-    {#if diagnostics.readiness.yt_dlp || diagnostics.readiness.storage}
+    {#if diagnostics.readiness.yt_dlp || diagnostics.readiness.storage || diagnostics.readiness.cookies}
       <section class="settings-section" aria-label="Tool and storage details">
         <h3>Runtime details</h3>
+        {#if diagnostics.readiness.cookies}
+          {@const cookies = diagnostics.readiness.cookies}
+          <dl class="settings-grid compact">
+            <div><dt>YouTube cookies</dt><dd>{cookies.configured ? 'Configured' : 'Not configured'}</dd></div>
+            {#if cookies.configured && cookies.path}<div><dt>Cookies path</dt><dd>{cookies.path}</dd></div>{/if}
+            <div><dt>Signed-in session</dt><dd>{cookies.auth_cookies ? (cookies.verified ? 'Present and verified' : 'Present') : 'Not found'}</dd></div>
+            {#if cookies.expiry}<div><dt>Session expiry</dt><dd>{new Date(cookies.expiry).toLocaleString()}</dd></div>{/if}
+            {#if cookies.last_probe}<div><dt>Last probe</dt><dd>{new Date(cookies.last_probe).toLocaleString()}</dd></div>{/if}
+            {#if cookies.probe_error}<div><dt>Probe error</dt><dd>{cookies.probe_error}</dd></div>{/if}
+          </dl>
+          <div class="cookies-probe-row">
+            <button class="refresh-diagnostics" type="button" onclick={testCookies} disabled={cookiesProbe.status === 'loading' || cookiesProbe.cooldown > 0}>{cookiesProbe.status === 'loading' ? 'Testing...' : cookiesProbe.cooldown > 0 ? `Retry in ${cookiesProbe.cooldown}s` : 'Test YouTube cookies'}</button>
+            {#if cookiesProbe.status === 'loaded'}
+              <span class:blocked={cookiesProbe.result?.probe_error} class:ready={!cookiesProbe.result?.probe_error}>{cookiesProbe.result?.verified ? 'Session verified against YouTube.' : `Probe did not pass: ${cookiesProbe.result?.probe_error || 'no result'}`}</span>
+            {:else if cookiesProbe.status === 'error' && cookiesProbe.error}
+              <span class="state-error">{cookiesProbe.error}</span>
+            {/if}
+          </div>
+        {/if}
         {#if diagnostics.readiness.yt_dlp}
           <dl class="settings-grid compact">
             <div><dt>yt-dlp version</dt><dd>{diagnostics.readiness.yt_dlp.version || 'Not detected'}</dd></div>
