@@ -1,6 +1,6 @@
 # Yummle
 
-Yummle is an opininated fork of Kapsel with a few extra features built on top. I've deliberately kept the Kapsel naming throughout as that is mainly what is running the show here. Yummle is a collection of tweaks and quality of life improvements for adding media from different sources and connecting to additonal front ends. Docker is the main deployment addition. Kapsel itself is a small self-hosted video archive for one person or household. It downloads online videos with `yt-dlp`, stores metadata in SQLite, keeps media on the filesystem, and serves a local web UI for browsing, searching, and watching your archive.
+Yummle is an opininated fork of Kapsel with a few extra features built on top. I've deliberately kept the Kapsel naming throughout as that is mainly what is running the show here. Yummle is a collection of tweaks and quality of life improvements for adding media from different sources and connecting to additional front ends. Docker is the main deployment addition. Kapsel itself is a small self-hosted video archive for one person or household. It downloads online videos with `yt-dlp`, stores metadata in SQLite, keeps media on the filesystem, and serves a local web UI for browsing, searching, and watching your archive.
 
 ![Yummle watch page showing an archived video](docs/kapsel-watch-screenshot.jpg)
 
